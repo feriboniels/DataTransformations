@@ -26,7 +26,7 @@ df = spark.read.json(json_file_path, multiLine=True)
 
 df.createTempView("tiempo")
 
-df1=spark.sql("select * from tiempo where  lat between 21.84 and 21.85 and lon between -102 and -102.3")
+df1=spark.sql("select desciel,dloc,lat,lon,nes from tiempo where  lat between 21.84 and 21.85 and lon between -102 and -102.3")
 
 
 
