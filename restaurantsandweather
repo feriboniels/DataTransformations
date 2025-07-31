@@ -3,34 +3,40 @@ import os
 import json
 from datetime import date, timedelta
 from pyspark.sql.functions import split, col
+from pyspark.sql import SparkSession
 
-# To import a Weather (provided by national authorities) file into local folder:
+# Initialize SparkSession
+spark = SparkSession.builder.appName("Restaurant_weather").getOrCreate()
+
+
+# To import a Weather file (provided by national authorities) into local folder:
 
 url = "https://smn.conagua.gob.mx/tools/GUI/webservices/?method=1"
 response = requests.get(url)
 with open("/home/jovyan/archivo.gz", "wb") as f:
 	f.write(response.content) 
 
+# Extract the file and rename it as archivo.txt
 os.system(f'gunzip archivo.gz') 
-
-print(os.getcwd())
-
-gunzip archivo.gz
+os.rename('archivo', 'archivo.txt')
+directory= os.getcwd()
 
 #json_file_path = "dbfs:/FileStore/tables/my_data.json" 
 
-json_file_path = "/home/jovyan/archivo"
+json_file_path = directory+'/archivo.txt'
 
 # Read the CSV file into a DataFrame
 df = spark.read.json(json_file_path, multiLine=True)
 
+# Create a temporal view
 df.createTempView("tiempo")
 
+# Filtering the data as need it, in this case the example consider the lat and lon coordinates
 df1=spark.sql("select desciel,dloc,lat,lon,nes from tiempo where  lat between 21.84 and 21.85 and lon between -102 and -102.3")
 
+# Seconda dataset , this is from INEGI who is a goverment statisticts and geography, for this example I am using information related to restaurants using the same coordinates as considered in the weather dataset
 
-
-
+# API connection filtering using coordinates and using auth key
 def get_word_details(word):
     language = ""
     headers = { }
@@ -43,15 +49,24 @@ if __name__ == "__main__":
     print(response.text)
 
 json_rdd = sc.parallelize([response.text])
+
+# Reading the API information and creating the dataframe
 df = spark.read.json(json_rdd)
+
+# Creating the temporal view
 df.createOrReplaceTempView('info')
 
+# Filtering the data
 dfp2= spark.sql("select Calle,Num_Exterior, Ubicacion ,Nombre, Latitud ,Longitud from info")
+
+# The Ubicacion field has several values separated by column, I took the first and changed to Ciudad , removed Ubicacion at the end in order to avoid duplicity and confusion
 df2=dfp2.withColumn('Ciudad',split(dfp2['Ubicacion'],',').getItem(0)).drop('Ubicacion')
 
+# Getting day value and putting into format for query
 ds=(str(date.today()- timedelta(days=1)).replace("-","")+"T00")
 dss= f'\"{ds}\"'
 
+# Creating the query and using the variable date in format of the values given by inegi
 query = f"""
 select dloc ,desciel, lat, lon ,nes, tmax,tmin 
 from tiempo where dloc ={dss} 
@@ -59,7 +74,13 @@ and  lat between 21.84 and 21.85
 and lon between -102 and -102.3 
 """
 
+# Making the query will return one raw, this is the weather for the city 
 df1 =spark.sql(query)
+
+# Adding the weather prediction to each row (restaurant)
 result_df = df1.crossJoin(df2)
 
+# Saving the results into a hive table
 result_df.write.format("parquet").mode("append").saveAsTable("geodata")
+
+spark.stop()
